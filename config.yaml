@@ -1,0 +1,42 @@
+# Weight Tracker Configuration
+
+# Source of truth
+health_log_path: "C:/life-os/personal/health/health-log.md"
+
+# Journey parameters
+start_date: "2026-03-16"
+start_weight: 660
+goal_weight: 245
+
+# Output paths
+output_dir: "E:/Projects/apleith/weight-tracker/output"
+obsidian_dashboard: "C:/life-os/personal/health/weight-dashboard.md"
+
+# Wallpaper settings
+wallpaper:
+  # Uses primary monitor resolution; override per-monitor if needed
+  width: 2560
+  height: 1440
+  dpi: 150
+  dark_theme: true
+
+# Server settings
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+# Piecewise model breakpoints (day, weight)
+# Updated from plan; recalibrate monthly with real data
+# ntfy.sh push notifications
+ntfy:
+  topic: "apleith_alerts"
+  priority: "default"  # low, default, high, urgent
+  remind_hour: 20  # 8pm — hour (24h) to check for missing entry
+
+model_breakpoints:
+  - [0, 660]
+  - [14, 640]
+  - [28, 620]
+  - [168, 525]
+  - [364, 418]
+  - [525, 375]

@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Weight Tracker</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --actual: #3fb950;
+    --ahead: #3fb950;
+    --behind: #f85149;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    min-height: 100vh;
+    padding: 24px;
+  }
+
+  .header {
+    margin-bottom: 20px;
+  }
+  .header h1 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+  .header .subtitle {
+    color: var(--text-dim);
+    font-size: 12px;
+    margin-top: 2px;
+  }
+
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .kpi-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+  }
+  .kpi-card .label {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+  }
+  .kpi-card .value {
+    font-size: 28px;
+    font-weight: 700;
+  }
+  .kpi-card .unit {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+  .kpi-card.ahead .value { color: var(--ahead); }
+  .kpi-card.behind .value { color: var(--behind); }
+
+  .shortcuts {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .shortcut {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 14px;
+    text-decoration: none;
+    color: var(--text-dim);
+    font-size: 12px;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .shortcut:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  .shortcut img {
+    width: 16px;
+    height: 16px;
+    border-radius: 2px;
+  }
+
+  .chart-container {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    height: calc(100vh - 290px);
+    min-height: 300px;
+  }
+
+  .loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    color: var(--text-dim);
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>WEIGHT TRACKER</h1>
+  <div class="subtitle" id="subtitle">Loading...</div>
+</div>
+
+<div class="kpi-grid" id="kpis"></div>
+
+<div class="shortcuts" id="shortcuts"></div>
+
+<div class="chart-container">
+  <canvas id="chart"></canvas>
+</div>
+
+<script>
+let chart = null;
+
+async function loadData() {
+  const resp = await fetch('/api/data');
+  const data = await resp.json();
+  renderKPIs(data.stats);
+  renderChart(data);
+  document.getElementById('subtitle').textContent =
+    `660 → ${data.goal_weight}  |  Started ${data.start_date}  |  Last update: ${data.stats.latest_date}`;
+}
+
+function renderKPIs(stats) {
+  const kpis = [
+    { label: 'Current', value: stats.current_weight.toFixed(1), unit: 'lbs' },
+    { label: 'Lost', value: stats.total_lost.toFixed(1), unit: `lbs (${stats.pct_lost}%)` },
+    { label: 'Expected', value: stats.expected_today.toFixed(1), unit: 'lbs today' },
+    { label: 'Deviation', value: (stats.deviation > 0 ? '+' : '') + stats.deviation.toFixed(1), unit: 'lbs',
+      cls: stats.deviation <= 0 ? 'ahead' : 'behind' },
+    { label: 'Rate', value: stats.recent_weekly_rate.toFixed(1), unit: 'lbs/week' },
+    { label: 'Day', value: stats.day_number, unit: `of 525` },
+  ];
+
+  const container = document.getElementById('kpis');
+  container.innerHTML = kpis.map(k => `
+    <div class="kpi-card ${k.cls || ''}">
+      <div class="label">${k.label}</div>
+      <div class="value">${k.value}</div>
+      <div class="unit">${k.unit}</div>
+    </div>
+  `).join('');
+}
+
+function renderChart(data) {
+  const ctx = document.getElementById('chart').getContext('2d');
+
+  const startDate = new Date(data.start_date);
+
+  // Expected curve: sample every 7 days for performance
+  const curveData = data.curve
+    .filter(p => p.day % 7 === 0 || p.day === 525)
+    .map(p => ({
+      x: new Date(startDate.getTime() + p.day * 86400000),
+      y: p.weight,
+    }));
+
+  // Actual data
+  const actualData = data.entries.map(e => ({
+    x: new Date(e.date),
+    y: e.weight,
+  }));
+
+  if (chart) chart.destroy();
+
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      datasets: [
+        {
+          label: 'Actual',
+          data: actualData,
+          borderColor: '#3fb950',
+          backgroundColor: '#3fb95033',
+          pointBackgroundColor: '#3fb950',
+          pointBorderColor: '#fff',
+          pointRadius: 5,
+          pointHoverRadius: 7,
+          borderWidth: 2.5,
+          tension: 0.1,
+          order: 1,
+        },
+        {
+          label: 'Expected',
+          data: curveData,
+          borderColor: '#58a6ff',
+          borderDash: [8, 4],
+          borderWidth: 2,
+          pointRadius: 0,
+          pointHoverRadius: 3,
+          tension: 0,
+          order: 2,
+        },
+        {
+          label: `Goal (${data.goal_weight})`,
+          data: [
+            { x: startDate, y: data.goal_weight },
+            { x: new Date(startDate.getTime() + 540 * 86400000), y: data.goal_weight },
+          ],
+          borderColor: '#f0883e',
+          borderDash: [4, 4],
+          borderWidth: 1,
+          pointRadius: 0,
+          order: 3,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: {
+          type: 'time',
+          time: { unit: 'month', displayFormats: { month: "MMM ''yy" } },
+          grid: { color: '#21262d' },
+          ticks: { color: '#8b949e', font: { family: 'monospace', size: 10 } },
+        },
+        y: {
+          min: data.goal_weight - 20,
+          max: data.start_weight + 10,
+          grid: { color: '#21262d' },
+          ticks: { color: '#8b949e', font: { family: 'monospace', size: 10 } },
+          title: { display: true, text: 'Weight (lbs)', color: '#8b949e',
+                   font: { family: 'monospace', size: 11 } },
+        },
+      },
+      plugins: {
+        legend: {
+          labels: { color: '#8b949e', font: { family: 'monospace', size: 11 } },
+        },
+        tooltip: {
+          backgroundColor: '#161b22',
+          borderColor: '#30363d',
+          borderWidth: 1,
+          titleColor: '#e6edf3',
+          bodyColor: '#8b949e',
+          titleFont: { family: 'monospace' },
+          bodyFont: { family: 'monospace' },
+          callbacks: {
+            label: function(ctx) {
+              return `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} lbs`;
+            }
+          }
+        },
+      },
+    },
+  });
+}
+
+// Shortcut links
+const shortcuts = [
+  { name: 'Toby', url: 'https://www.gettoby.com/open-toby' },
+  { name: 'Blackboard', url: 'https://bb.siue.edu/ultra/' },
+  { name: 'GitHub', url: 'https://github.com/' },
+  { name: 'SIM Lab', url: 'https://sim-lab-siue.github.io/' },
+  { name: 'SIM DAD', url: 'https://simdadllc.com/' },
+  { name: 'Claude', url: 'https://claude.ai/' },
+  { name: 'YouTube', url: 'https://www.youtube.com/' },
+  { name: 'Amazon', url: 'https://www.amazon.com/' },
+];
+
+function renderShortcuts() {
+  const container = document.getElementById('shortcuts');
+  container.innerHTML = shortcuts.map(s => {
+    const favicon = `https://www.google.com/s2/favicons?domain=${new URL(s.url).hostname}&sz=32`;
+    return `<a class="shortcut" href="${s.url}" target="_top">
+      <img src="${favicon}" alt="">
+      ${s.name}
+    </a>`;
+  }).join('');
+}
+
+renderShortcuts();
+loadData();
+// Refresh every 5 minutes
+setInterval(loadData, 300000);
+</script>
+</body>
+</html>

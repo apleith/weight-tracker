@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Weight Tracker New Tab (LAN)",
+  "version": "1.0",
+  "description": "Redirects new tabs to the Weight Tracker dashboard on NSF-Leith:8080",
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
+  "icons": {
+    "128": "icon128.png"
+  }
+}
